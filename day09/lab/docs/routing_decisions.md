@@ -1,64 +1,86 @@
 # Routing Decisions Log — Lab Day 09
 
-**Nhóm:** VinUni-D9-L9  
-**Ngày:** 2026-04-14
+**Nhóm:** Nguyễn Đức Cường - Trần Khánh Bằng - Đỗ Hải Nam 
+**Ngày:** 14/04/2026
+
+> **Hướng dẫn:** Ghi lại ít nhất **3 quyết định routing** thực tế từ trace của nhóm.
+> Không ghi giả định — phải từ trace thật (`artifacts/traces/`).
+> 
+> Mỗi entry phải có: task đầu vào → worker được chọn → route_reason → kết quả thực tế.
 
 ---
 
 ## Routing Decision #1
 
 **Task đầu vào:**
-> SLA xử lý ticket P1 là bao lâu?
+> ERR-403-AUTH là lỗi gì và cách xử lý?
 
-**Worker được chọn:** `retrieval_worker`  
-**Route reason (từ trace):** `task contains P1 SLA keyword`  
-**MCP tools được gọi:** `search_kb`  
-**Workers called sequence:** `supervisor -> retrieval_worker -> synthesis_worker`
+**Worker được chọn:** `human_review` -> `retrieval_worker`  
+**Route reason (từ trace):** `unknown error code + risk_high → human review`  
+**MCP tools được gọi:** N/A  
+**Workers called sequence:** `supervisor -> human_review -> retrieval_worker -> synthesis_worker`
 
 **Kết quả thực tế:**
-- final_answer (ngắn): SLA phản hồi ban đầu 15 phút và thời gian xử lý là 4 giờ [sla_p1_2026.txt].
-- confidence: 0.95
+- final_answer (ngắn): Câu trả lời được tổng hợp từ tài liệu (cụ thể tuỳ hệ thống, nhắm vào việc giải thích auth error).
+- confidence: 0.37
 - Correct routing? Yes
 
-**Nhận xét:** Routing chính xác vì câu hỏi thuần túy tra cứu thông tin (SLA).
+**Nhận xét:** 
+Định tuyến rất chính xác vì hệ thống bắt được từ khóa mã lỗi `ERR-` và yêu cầu sự can thiệp của con người thông qua bước `human_review` trước khi tiến hành tra cứu `retrieval_worker`.
 
 ---
 
 ## Routing Decision #2
 
 **Task đầu vào:**
-> Khách hàng Flash Sale yêu cầu hoàn tiền ngày 05/02/2026. Có được không?
+> Quy trình xử lý sự cố P1 gồm mấy bước và bước đầu tiên là gì?
 
-**Worker được chọn:** `policy_tool_worker`  
-**Route reason (từ trace):** `task contains policy/refund keyword | needs_tool flagged`  
-**MCP tools được gọi:** `search_kb`  
-**Workers called sequence:** `supervisor -> retrieval_worker -> policy_tool_worker -> synthesis_worker`
+**Worker được chọn:** `retrieval_worker`  
+**Route reason (từ trace):** `task contains SLA/ticket keywords`  
+**MCP tools được gọi:** N/A  
+**Workers called sequence:** `supervisor -> retrieval_worker -> synthesis_worker`
 
 **Kết quả thực tế:**
-- final_answer (ngắn): Không được hoàn tiền vì đơn hàng Flash Sale nằm trong danh mục ngoại lệ (Điều 3 chính sách v4).
-- confidence: 0.98
+- final_answer (ngắn): Câu trả lời dựa trên nội dung sla_p1_2026.txt.
+- confidence: 0.49
 - Correct routing? Yes
 
-**Nhận xét:** Supervisor nhận diện đúng context cần kiểm tra policy. Luồng đi qua Retrieval trước để lấy context "Điều 3" là rất hợp lý.
+**Nhận xét:**
+Vì câu hỏi chứa từ khoá "P1" thuộc nhóm `retrieval_keywords`, supervisor mặc định gửi query thẳng sang `retrieval_worker` để truy vấn vector search. Đây là bước tối ưu vì câu hỏi mang tính chất tra cứu tài liệu thay vì thao tác policy.
 
 ---
 
 ## Routing Decision #3
 
 **Task đầu vào:**
-> Cấp quyền Level 3 cho contractor đang fix P1 khẩn cấp.
+> Ticket P1 lúc 2am. Cần cấp Level 2 access tạm thời cho contractor.
 
 **Worker được chọn:** `policy_tool_worker`  
-**Route reason (từ trace):** `task contains access/level 3 keyword | risk_high flagged`  
-**MCP tools được gọi:** `check_access_permission`, `get_ticket_info`  
-**Workers called sequence:** `supervisor -> retrieval_worker -> policy_tool_worker -> synthesis_worker`
+**Route reason (từ trace):** `task contains policy/access keyword | risk_high flagged`  
+**MCP tools được gọi:** `check_access_permission`  
+**Workers called sequence:** `supervisor -> policy_tool_worker -> synthesis_worker`
 
 **Kết quả thực tế:**
-- final_answer (ngắn): Level 3 không có emergency bypass. Cần 3 bên phê duyệt: Line Manager, IT Admin, và IT Security.
-- confidence: 0.92
+- final_answer (ngắn): Trả lời theo context phân quyền và rule của hệ thống cho contractor lúc khẩn cấp.
+- confidence: 0.57
 - Correct routing? Yes
 
-**Nhận xét:** Một ca routing khó vì vừa có P1 (IT) vừa có Level 3 (Policy). Supervisor đã chọn Policy là đúng vì quy tắc cấp quyền là rào cản quan trọng nhất cần kiểm tra.
+**Nhận xét:**
+Router nhận diện chính xác các keyword `access` (chuyển sang policy_tool) và `2am` (raise risk_high). Kết quả test chạy mượt mà và confidence thuộc nhóm cao (0.57 so sánh với AVG là 0.513).
+
+---
+
+## Routing Decision #4 (tuỳ chọn — bonus)
+
+**Task đầu vào:**
+> _________________
+
+**Worker được chọn:** `___________________`  
+**Route reason:** `___________________`
+
+**Nhận xét: Đây là trường hợp routing khó nhất trong lab. Tại sao?**
+
+_________________
 
 ---
 
@@ -68,21 +90,29 @@
 
 | Worker | Số câu được route | % tổng |
 |--------|------------------|--------|
-| retrieval_worker | 9 | 60% |
-| policy_tool_worker | 5 | 33% |
-| human_review | 1 | 7% |
+| retrieval_worker | 8 | 50% |
+| policy_tool_worker | 8 | 50% |
+| human_review | 1 | 6% |
 
 ### Routing Accuracy
 
-- Câu route đúng: 14 / 15
-- Câu route sai (đã sửa bằng cách nào?): 1 (đã thêm keyword "access" vào logic supervisor)
-- Câu trigger HITL: 1 (câu hỏi về mã lỗi lạ ERR-403)
+> Trong số 16 câu nhóm đã chạy, bao nhiêu câu supervisor route đúng?
+
+- Câu route đúng: 16 / 16
+- Câu route sai (đã sửa bằng cách nào?): 0
+- Câu trigger HITL: 1
 
 ### Lesson Learned về Routing
 
-1. **Sequential over Parallel:** Việc cho phép `retrieval` chạy trước để cung cấp context cho `policy_worker` giúp tăng độ chính xác lên rất nhiều so với việc để policy worker tự tìm kiếm.
-2. **Keyword is often enough:** Với tập data nội bộ nhỏ, keyword matching cho kết quả tin cậy và latency thấp hơn nhiều so với dùng LLM Classifier.
+> Quyết định kỹ thuật quan trọng nhất nhóm đưa ra về routing logic là gì?  
+> (VD: dùng keyword matching vs LLM classifier, threshold confidence cho HITL, v.v.)
+
+1. Sử dụng Keyword Matching linh hoạt, thiết lập biến cờ (flags) như `risk_high` để linh hoạt thay đổi flow tuỳ theo bối cảnh.
+2. Cho phép Route Chaining như việc sau khi qua `human_review` thì quay về `retrieval_worker`.
 
 ### Route Reason Quality
 
-Các `route_reason` hiện tại đã đủ tốt để debug. Tuy nhiên, trong tương lai chúng tôi sẽ bổ sung thêm "Keyword triggered" cụ thể (ví dụ: `reason: refund keyword found`) để biết chính xác tại sao supervisor lại chọn worker đó.
+> Nhìn lại các `route_reason` trong trace — chúng có đủ thông tin để debug không?  
+> Nếu chưa, nhóm sẽ cải tiến format route_reason thế nào?
+
+Có chứa đủ lý do tổng quan để log. Để tốt hơn, ta có thể lưu thêm "confidence of route decision" (đặc biệt khi router được thay thế bằng LLM-based classifier) giúp nhận biết nếu Supervisor không chắc chắn khi chốt route.

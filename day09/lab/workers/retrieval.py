@@ -31,39 +31,6 @@ load_dotenv()
 WORKER_NAME = "retrieval_worker"
 DEFAULT_TOP_K = 3
 
-
-# def _get_embedding_fn():
-#     """
-#     Trả về embedding function.
-#     TODO Sprint 1: Implement dùng OpenAI hoặc Sentence Transformers.
-#     """
-#     # Option A: Sentence Transformers (offline, không cần API key)
-#     try:
-#         from sentence_transformers import SentenceTransformer
-#         model = SentenceTransformer("all-MiniLM-L6-v2")
-#         def embed(text: str) -> list:
-#             return model.encode([text])[0].tolist()
-#         return embed
-#     except ImportError:
-#         pass
-
-#     # Option B: OpenAI (cần API key)
-#     try:
-#         from openai import OpenAI
-#         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-#         def embed(text: str) -> list:
-#             resp = client.embeddings.create(input=text, model="text-embedding-3-small")
-#             return resp.data[0].embedding
-#         return embed
-#     except ImportError:
-#         pass
-
-#     # Fallback: random embeddings cho test (KHÔNG dùng production)
-#     import random
-#     def embed(text: str) -> list:
-#         return [random.random() for _ in range(384)]
-#     print("⚠️  WARNING: Using random embeddings (test only). Install sentence-transformers.")
-#     return embed
 def get_embedding(text: str, task: str = "retrieval.passage") -> List[float]:
     """
     Tạo embedding vector bằng Jina AI API (Model: jina-embeddings-v5-text-small).

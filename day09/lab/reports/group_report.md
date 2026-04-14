@@ -4,10 +4,10 @@
 **Thành viên:**
 | Tên | Vai trò | Email |
 |-----|---------|-------|
-| Supervisor Owner | Supervisor Owner | vinuni.supervisor@example.com |
-| Worker Owner | Worker Owner | vinuni.worker@example.com |
-| MCP Owner | MCP Owner | vinuni.mcp@example.com |
-| Trace & Docs Owner | Trace & Docs Owner | vinuni.docs@example.com |
+| Trần Khánh Bằng | Supervisor Owner | khanhbangvt123@gmail.com |
+| Nguyễn Đức Cường | Worker Owner | nam.dh200418@gmail.com |
+| Đỗ Hải Nam | MCP Owner | cuong111103hd@gmail.com |
+| ALl | Trace & Docs Owner |  |
 
 **Ngày nộp:** 2026-04-14  
 **Repo:** VinUni-AICB-P1/D9-Multi-Agent  
