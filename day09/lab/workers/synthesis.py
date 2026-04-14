@@ -20,46 +20,64 @@ import os
 
 WORKER_NAME = "synthesis_worker"
 
-SYSTEM_PROMPT = """Bạn là trợ lý IT Helpdesk nội bộ.
+SYSTEM_PROMPT = """Bạn là trợ lý AI chuyên gia hỗ trợ IT Helpdesk, HR và Tra cứu Chính sách nội bộ.
+Nhiệm vụ của bạn là tổng hợp câu trả lời từ tài liệu được trích xuất (retrieval) và kết quả phân tích quy tắc (policy logic).
 
-Quy tắc nghiêm ngặt:
-1. CHỈ trả lời dựa vào context được cung cấp. KHÔNG dùng kiến thức ngoài.
-2. Nếu context không đủ để trả lời → nói rõ "Không đủ thông tin trong tài liệu nội bộ".
-3. Trích dẫn nguồn cuối mỗi câu quan trọng: [tên_file].
-4. Trả lời súc tích, có cấu trúc. Không dài dòng.
-5. Nếu có exceptions/ngoại lệ → nêu rõ ràng trước khi kết luận.
+QUY TẮC NGHIÊM NGẶT:
+1. TRUNG THỰC VỚI DỮ LIỆU: Chỉ trả lời dựa trên context được cung cấp. Không được phép bịa đặt hoặc dùng kiến thức ngoài.
+2. ABSTAIN (TỪ CHỐI TRẢ LỜI): Nếu context không chứa thông tin cần thiết, hãy nói rõ: "Không đủ thông tin trong tài liệu nội bộ hiện có. Hãy liên hệ bộ phận liên quan (IT Helpdesk, HR, v.v.) để được hỗ trợ trực tiếp."
+3. CHI TIẾT & CHÍNH XÁC:
+   - Các con số (SLA, ngày nghỉ, số lần login, tỷ lệ % hoàn tiền) phải khớp tuyệt đối với tài liệu.
+   - Các mốc thời gian (escalation time, response time) cần được trích xuất hoặc tính toán chính xác.
+4. XỬ LÝ NGOẠI LỆ (POLICY EXCEPTIONS): Luôn làm nổi bật các ngoại lệ (ví dụ: sản phẩm kỹ thuật số, Flash Sale, hoặc nhân viên đang trong kỳ probation) trước khi đưa ra kết luận.
+5. TEMPORAL SCOPING (LINH HOẠT THEO THỜI GIAN): Lưu ý hiệu lực của chính sách (ví dụ: Đơn hàng trước 01/02/2026 áp dụng chính sách v3 không có trong docs). Hãy cảnh báo người dùng nếu yêu cầu rơi vào khoảng thời gian này.
+6. TỔNG HỢP ĐA NGUỒN (MULTI-HOP): Nếu câu hỏi phức tạp liên quan đến nhiều lĩnh vực (ví dụ: vừa SLA vừa Access Control), hãy trình bày rõ ràng từng quy trình song song.
+7. TRÍCH DẪN NGUỒN: Phải ghi rõ tên file tài liệu [tên_file.txt] ở cuối mỗi ý quan trọng hoặc cuối đoạn văn.
+
+PHONG CÁCH PHẢN HỒI:
+- Trình bày có cấu trúc (sử dụng bullet points cho các bước hoặc danh sách).
+- Ngôn ngữ chuyên nghiệp, tin cậy, súc tích.
 """
 
 
 def _call_llm(messages: list) -> str:
     """
     Gọi LLM để tổng hợp câu trả lời.
-    TODO Sprint 2: Implement với OpenAI hoặc Gemini.
+    Ưu tiên dùng Groq (via OpenAI client) theo yêu cầu hệ thống.
     """
-    # Option A: OpenAI
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.1,  # Low temperature để grounded
-            max_tokens=500,
-        )
-        return response.choices[0].message.content
-    except Exception:
-        pass
+    # 1. Option A: Groq (via OpenAI compatible API)
+    groq_api_key = os.getenv("GROQ_API_KEY") or os.getenv("ROQ_API_KEY")
+    if groq_api_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=groq_api_key,
+                base_url=os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+            )
+            response = client.chat.completions.create(
+                model=os.getenv("LLM_MODEL", "llama-3.1-8b-instant"),
+                messages=messages,
+                temperature=0.1,
+                max_tokens=800,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"⚠️  Groq failed: {e}")
 
-    # Option B: Gemini
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        combined = "\n".join([m["content"] for m in messages])
-        response = model.generate_content(combined)
-        return response.text
-    except Exception:
-        pass
+    # 2. Option B: OpenAI (Legacy/Fallback)
+    if os.getenv("OPENAI_API_KEY"):
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=0.1,
+                max_tokens=800,
+            )
+            return response.choices[0].message.content
+        except Exception:
+            pass
 
     # Fallback: trả về message báo lỗi (không hallucinate)
     return "[SYNTHESIS ERROR] Không thể gọi LLM. Kiểm tra API key trong .env."

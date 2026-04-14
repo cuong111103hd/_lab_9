@@ -17,6 +17,10 @@ Gọi độc lập để test:
 
 import os
 import sys
+from typing import List, Dict, Any, Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ─────────────────────────────────────────────
 # Worker Contract (xem contracts/worker_contracts.yaml)
@@ -28,39 +32,66 @@ WORKER_NAME = "retrieval_worker"
 DEFAULT_TOP_K = 3
 
 
-def _get_embedding_fn():
+# def _get_embedding_fn():
+#     """
+#     Trả về embedding function.
+#     TODO Sprint 1: Implement dùng OpenAI hoặc Sentence Transformers.
+#     """
+#     # Option A: Sentence Transformers (offline, không cần API key)
+#     try:
+#         from sentence_transformers import SentenceTransformer
+#         model = SentenceTransformer("all-MiniLM-L6-v2")
+#         def embed(text: str) -> list:
+#             return model.encode([text])[0].tolist()
+#         return embed
+#     except ImportError:
+#         pass
+
+#     # Option B: OpenAI (cần API key)
+#     try:
+#         from openai import OpenAI
+#         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+#         def embed(text: str) -> list:
+#             resp = client.embeddings.create(input=text, model="text-embedding-3-small")
+#             return resp.data[0].embedding
+#         return embed
+#     except ImportError:
+#         pass
+
+#     # Fallback: random embeddings cho test (KHÔNG dùng production)
+#     import random
+#     def embed(text: str) -> list:
+#         return [random.random() for _ in range(384)]
+#     print("⚠️  WARNING: Using random embeddings (test only). Install sentence-transformers.")
+#     return embed
+def get_embedding(text: str, task: str = "retrieval.passage") -> List[float]:
     """
-    Trả về embedding function.
-    TODO Sprint 1: Implement dùng OpenAI hoặc Sentence Transformers.
+    Tạo embedding vector bằng Jina AI API (Model: jina-embeddings-v5-text-small).
     """
-    # Option A: Sentence Transformers (offline, không cần API key)
-    try:
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        def embed(text: str) -> list:
-            return model.encode([text])[0].tolist()
-        return embed
-    except ImportError:
-        pass
-
-    # Option B: OpenAI (cần API key)
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        def embed(text: str) -> list:
-            resp = client.embeddings.create(input=text, model="text-embedding-3-small")
-            return resp.data[0].embedding
-        return embed
-    except ImportError:
-        pass
-
-    # Fallback: random embeddings cho test (KHÔNG dùng production)
-    import random
-    def embed(text: str) -> list:
-        return [random.random() for _ in range(384)]
-    print("⚠️  WARNING: Using random embeddings (test only). Install sentence-transformers.")
-    return embed
-
+    import requests
+    api_key = os.getenv("JINA_API_KEY")
+    if not api_key:
+        raise ValueError("Missing JINA_API_KEY in .env file")
+    
+    url = "https://api.jina.ai/v1/embeddings"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    data = {
+        "model": "jina-embeddings-v5-text-small",
+        "task": task,
+        "dimensions": 1024,
+        "input": [text]
+    }
+    
+    response = requests.post(url, headers=headers, json=data)
+    
+    if response.status_code == 200:
+        return response.json()['data'][0]['embedding']
+    else:
+        raise Exception(f"Jina API Error: {response.status_code} - {response.text}")
 
 def _get_collection():
     """
@@ -68,16 +99,21 @@ def _get_collection():
     TODO Sprint 2: Đảm bảo collection đã được build từ Step 3 trong README.
     """
     import chromadb
-    client = chromadb.PersistentClient(path="./chroma_db")
+    from pathlib import Path
+    
+    # Path to chroma_db relative to the root (assuming this file is in workers/ folder)
+    db_path = str(Path(__file__).parent.parent / "chroma_db")
+    client = chromadb.PersistentClient(path=db_path)
     try:
-        collection = client.get_collection("day09_docs")
+        collection = client.get_collection("rag_lab")
     except Exception:
         # Auto-create nếu chưa có
         collection = client.get_or_create_collection(
-            "day09_docs",
+            "rag_lab",
             metadata={"hnsw:space": "cosine"}
         )
         print(f"⚠️  Collection 'day09_docs' chưa có data. Chạy index script trong README trước.")
+    
     return collection
 
 
@@ -94,9 +130,9 @@ def retrieve_dense(query: str, top_k: int = DEFAULT_TOP_K) -> list:
         list of {"text": str, "source": str, "score": float, "metadata": dict}
     """
     # TODO: Implement dense retrieval
-    embed = _get_embedding_fn()
-    query_embedding = embed(query)
-
+    import chromadb 
+    query_embedding = get_embedding(query, task="retrieval.query")
+    
     try:
         collection = _get_collection()
         results = collection.query(
@@ -152,10 +188,9 @@ def run(state: dict) -> dict:
     }
 
     try:
+        
         chunks = retrieve_dense(task, top_k=top_k)
-
         sources = list({c["source"] for c in chunks})
-
         state["retrieved_chunks"] = chunks
         state["retrieved_sources"] = sources
 

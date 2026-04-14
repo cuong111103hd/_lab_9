@@ -65,22 +65,13 @@ def _call_mcp_tool(tool_name: str, tool_input: dict) -> dict:
 def analyze_policy(task: str, chunks: list) -> dict:
     """
     Phân tích policy dựa trên context chunks.
-
-    TODO Sprint 2: Implement logic này với LLM call hoặc rule-based check.
-
-    Cần xử lý các exceptions:
-    - Flash Sale → không được hoàn tiền
-    - Digital product / license key / subscription → không được hoàn tiền
-    - Sản phẩm đã kích hoạt → không được hoàn tiền
-    - Đơn hàng trước 01/02/2026 → áp dụng policy v3 (không có trong docs)
-
-    Returns:
-        dict with: policy_applies, policy_name, exceptions_found, source, rule, explanation
+    Sử dụng kết hợp Rule-based (nhanh, chính xác cho keyword) 
+    và LLM-based (linh hoạt cho ngữ cảnh phức tạp).
     """
     task_lower = task.lower()
     context_text = " ".join([c.get("text", "") for c in chunks]).lower()
 
-    # --- Rule-based exception detection ---
+    # --- 1. Rule-based exception detection (Fast Path) ---
     exceptions_found = []
 
     # Exception 1: Flash Sale
@@ -107,29 +98,59 @@ def analyze_policy(task: str, chunks: list) -> dict:
             "source": "policy_refund_v4.txt",
         })
 
-    # Determine policy_applies
-    policy_applies = len(exceptions_found) == 0
-
-    # Determine which policy version applies (temporal scoping)
-    # TODO: Check nếu đơn hàng trước 01/02/2026 → v3 applies (không có docs, nên flag cho synthesis)
+    # --- 2. Temporal Scoping (Date Check) ---
+    # TODO: Cải thiện nhận diện ngày tháng bằng Regex hoặc LLM
     policy_name = "refund_policy_v4"
     policy_version_note = ""
-    if "31/01" in task_lower or "30/01" in task_lower or "trước 01/02" in task_lower:
-        policy_version_note = "Đơn hàng đặt trước 01/02/2026 áp dụng chính sách v3 (không có trong tài liệu hiện tại)."
+    # Giả định: nếu Task nhắc đến ngày trước 01/02/2026
+    if any(kw in task_lower for kw in ["31/01", "30/01", "trước 01/02", "tháng 1"]):
+        policy_version_note = "Đơn hàng đặt trước 01/02/2026 áp dụng chính sách v3 (không có trong tài liệu hiện tại). Cần escalate cho nhân viên HR."
+        exceptions_found.append({
+            "type": "outdated_policy_exception",
+            "rule": "Hệ thống RAG hiện tại chỉ chứa chính sách v4 (từ 01/02/2026).",
+            "source": "system_limitation",
+        })
 
-    # TODO Sprint 2: Gọi LLM để phân tích phức tạp hơn
-    # Ví dụ:
-    # from openai import OpenAI
-    # client = OpenAI()
-    # response = client.chat.completions.create(
-    #     model="gpt-4o-mini",
-    #     messages=[
-    #         {"role": "system", "content": "Bạn là policy analyst. Dựa vào context, xác định policy áp dụng và các exceptions."},
-    #         {"role": "user", "content": f"Task: {task}\n\nContext:\n" + "\n".join([c['text'] for c in chunks])}
-    #     ]
-    # )
-    # analysis = response.choices[0].message.content
+    # --- 3. LLM-based analysis (Deep Path) ---
+    explanation = "Analyzed via rule-based checks."
+    
+    # Chỉ gọi LLM nếu có API key và có chunks để phân tích
+    groq_api_key = os.getenv("GROQ_API_KEY") or os.getenv("ROQ_API_KEY")
+    if groq_api_key and chunks:
+        try:
+            from openai import OpenAI
+            # Groq cung cấp API tương thích với OpenAI
+            client = OpenAI(
+                api_key=groq_api_key,
+                base_url=os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+            )
+            
+            model_name = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+            
+            prompt = f"""Bạn là chuyên gia phân tích chính sách (Policy Analyst).
+Dựa vào tài liệu sau, hãy xác định yêu cầu của người dùng có vi phạm 'Điều 3: Ngoại lệ' không.
 
+Tài liệu:
+{context_text}
+
+Yêu cầu người dùng:
+{task}
+
+Trả lời ngắn gọn:
+1. Có vi phạm không? (CÓ/KHÔNG)
+2. Nếu có, đó là ngoại lệ nào?
+3. Lý do cụ thể."""
+
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+            )
+            explanation = response.choices[0].message.content
+        except Exception as e:
+            explanation = f"Groq analysis failed: {e}. Falling back to rules."
+
+    policy_applies = len(exceptions_found) == 0
     sources = list({c.get("source", "unknown") for c in chunks if c})
 
     return {
@@ -192,11 +213,29 @@ def run(state: dict) -> dict:
         policy_result = analyze_policy(task, chunks)
         state["policy_result"] = policy_result
 
-        # Step 3: Nếu cần thêm info từ MCP (e.g., ticket status), gọi get_ticket_info
-        if needs_tool and any(kw in task.lower() for kw in ["ticket", "p1", "jira"]):
-            mcp_result = _call_mcp_tool("get_ticket_info", {"ticket_id": "P1-LATEST"})
-            state["mcp_tools_used"].append(mcp_result)
-            state["history"].append(f"[{WORKER_NAME}] called MCP get_ticket_info")
+        # Step 3: Nếu cần thêm info từ MCP (e.g., ticket status, access rules), gọi tools tương ứng
+        if needs_tool:
+            # Ticket info
+            if any(kw in task.lower() for kw in ["ticket", "p1", "jira", "it-"]):
+                # Giả định lấy ticket ID từ task hoặc mặc định P1-LATEST
+                mcp_result = _call_mcp_tool("get_ticket_info", {"ticket_id": "P1-LATEST"})
+                state["mcp_tools_used"].append(mcp_result)
+                state["history"].append(f"[{WORKER_NAME}] called MCP get_ticket_info")
+            
+            # Access permission check
+            if any(kw in task.lower() for kw in ["cấp quyền", "access", "level"]):
+                # Mock logic để xác định level
+                level = 1
+                if "level 2" in task.lower(): level = 2
+                if "level 3" in task.lower(): level = 3
+                
+                mcp_result = _call_mcp_tool("check_access_permission", {
+                    "access_level": level,
+                    "requester_role": "employee", 
+                    "is_emergency": "khẩn cấp" in task.lower() or "emergency" in task.lower()
+                })
+                state["mcp_tools_used"].append(mcp_result)
+                state["history"].append(f"[{WORKER_NAME}] called MCP check_access_permission")
 
         worker_io["output"] = {
             "policy_applies": policy_result["policy_applies"],
